@@ -114,7 +114,7 @@ def baixar_imagens(pesquisa, quantidade):
                         
                         # Armazenar metadados
                         metadata[nome_arquivo] = img_url
-                        urls_salvas.append(nome_arquivo)  # Adicionar nome do arquivo à lista
+                        urls_salvas.append(img_url)  # Adicionar URL original à lista em vez do nome do arquivo
                         contador += 1
                         
                         # Pequena pausa entre os downloads
