@@ -82,6 +82,28 @@
             align-items: center;
             justify-content: center;
         }
+        
+        /* Indicador de carregamento */
+        .spinner-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 15px 0;
+        }
+        .spinner-border {
+            margin-right: 10px;
+        }
+        
+        /* Notificação sobre limites na Vercel */
+        .vercel-notice {
+            background-color: #cce5ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -91,6 +113,10 @@
                 <h4 class="mb-0">Baixador de Imagens</h4>
             </div>
             <div class="card-body">
+                <div class="vercel-notice">
+                    <strong>Nota:</strong> Quando rodando na Vercel, por limitações do ambiente, apenas as URLs das imagens são retornadas (sem download real). Para download completo, execute localmente.
+                </div>
+
                 <form id="downloadForm">
                     <div class="mb-3">
                         <label for="pesquisa" class="form-label">O que você quer pesquisar?</label>
@@ -98,7 +124,8 @@
                     </div>
                     <div class="mb-3">
                         <label for="quantidade" class="form-label">Quantas imagens você quer baixar?</label>
-                        <input type="number" class="form-control" id="quantidade" name="quantidade" min="1" value="5" required>
+                        <input type="number" class="form-control" id="quantidade" name="quantidade" min="1" max="15" value="5" required>
+                        <small class="text-muted">Máximo de 15 imagens na Vercel para melhor desempenho.</small>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">Baixar Imagens</button>
@@ -112,6 +139,13 @@
 
                 <div id="statusMessage" class="status-message"></div>
 
+                <div class="spinner-container" id="spinnerContainer" style="display: none;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <span>Processando seu pedido. Por favor, aguarde...</span>
+                </div>
+
                 <div class="image-grid" id="urlContainer"></div>
             </div>
         </div>
@@ -124,20 +158,39 @@
         const statusMessage = document.getElementById('statusMessage');
         const urlContainer = document.getElementById('urlContainer');
         const deleteBtn = document.getElementById('deleteBtn');
+        const spinnerContainer = document.getElementById('spinnerContainer');
         
         // Variável para controlar o intervalo de status
         let statusCheckInterval = null;
         
-        // Função para criar um card de imagem de forma direta e simples
+        // Verificar se estamos na Vercel
+        const isVercel = window.location.hostname.includes('vercel.app');
+        
+        // Função para criar um card de imagem
         function createImageElement(url, index) {
             const imageCard = document.createElement('div');
             imageCard.className = 'image-card';
             
-            // Criar imagem com carregamento direto
+            // Criar imagem
             const imagePreview = document.createElement('img');
             imagePreview.className = 'image-preview';
-            imagePreview.src = url;
+            imagePreview.loading = 'lazy'; // Usar lazy loading nativo
             imagePreview.alt = `Imagem ${index + 1}`;
+            
+            // Usar crossorigin anonymous para evitar problemas CORS na Vercel
+            if (isVercel) {
+                imagePreview.crossOrigin = 'anonymous';
+                // Usar uma proxy para imagens, se necessário
+                // imagePreview.src = `https://images.weserv.nl/?url=${encodeURIComponent(url)}`;
+                imagePreview.src = url;
+                
+                // Fallback se a imagem falhar ao carregar
+                imagePreview.onerror = function() {
+                    this.src = 'https://via.placeholder.com/300x200?text=Imagem+não+disponível';
+                };
+            } else {
+                imagePreview.src = url;
+            }
             
             const imageInfo = document.createElement('div');
             imageInfo.className = 'image-info';
@@ -162,50 +215,90 @@
         // Função para verificar o status do download
         async function checkDownloadStatus() {
             try {
+                // Mostrar spinner durante a verificação
+                spinnerContainer.style.display = 'flex';
+                
                 const statusResponse = await fetch('/status');
                 const status = await statusResponse.json();
                 
-                progressBar.style.width = `${(status.progresso / status.total) * 100}%`;
+                // Atualizar barra de progresso
+                const progressPercent = (status.progresso / status.total) * 100;
+                progressBar.style.width = `${progressPercent}%`;
                 statusMessage.textContent = status.mensagem;
                 
                 if (!status.em_andamento) {
+                    // Processo concluído
                     clearInterval(statusCheckInterval);
+                    spinnerContainer.style.display = 'none';
                     
                     // Mostrar URLs das imagens
                     if (status.urls && status.urls.length > 0) {
                         console.log("Recebidas URLs:", status.urls.length);
+                        
                         // Limpar o container
                         urlContainer.innerHTML = '';
                         
+                        // Usar DocumentFragment para melhor performance
+                        const fragment = document.createDocumentFragment();
+                        
                         status.urls.forEach((url, index) => {
                             const imageCard = createImageElement(url, index);
-                            urlContainer.appendChild(imageCard);
+                            fragment.appendChild(imageCard);
                         });
+                        
+                        urlContainer.appendChild(fragment);
+                    } else {
+                        statusMessage.textContent = 'Nenhuma imagem encontrada.';
+                        statusMessage.className = 'status-message error';
+                        statusMessage.style.display = 'block';
                     }
                 }
             } catch (error) {
                 console.error('Erro ao verificar status:', error);
+                statusMessage.textContent = 'Erro ao verificar status: ' + error.message;
+                statusMessage.className = 'status-message error';
+                statusMessage.style.display = 'block';
+                spinnerContainer.style.display = 'none';
             }
         }
+        
+        // Variável para evitar envios múltiplos
+        let isSubmitting = false;
         
         // Manipulador de evento para o formulário de download
         downloadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const formData = new FormData(e.target);
-            
-            // Limpar URLs anteriores
-            urlContainer.innerHTML = '';
+            // Evitar múltiplos envios
+            if (isSubmitting) return;
+            isSubmitting = true;
             
             try {
+                const formData = new FormData(e.target);
+                
+                // Limpar URLs anteriores
+                urlContainer.innerHTML = '';
+                
+                // Mostrar mensagem de status inicial
                 statusMessage.textContent = "Iniciando download...";
                 statusMessage.className = 'status-message success';
                 statusMessage.style.display = 'block';
+                
+                // Mostrar spinner
+                spinnerContainer.style.display = 'flex';
+                
+                // Mostrar barra de progresso
+                document.querySelector('.progress').style.display = 'block';
+                progressBar.style.width = '0%';
                 
                 const response = await fetch('/baixar', {
                     method: 'POST',
                     body: formData
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`Erro no servidor: ${response.status}`);
+                }
                 
                 const data = await response.json();
                 
@@ -213,29 +306,31 @@
                     statusMessage.textContent = data.erro;
                     statusMessage.className = 'status-message error';
                     statusMessage.style.display = 'block';
+                    spinnerContainer.style.display = 'none';
                     return;
                 }
                 
                 statusMessage.textContent = data.mensagem;
-                statusMessage.className = 'status-message success';
-                statusMessage.style.display = 'block';
-                
-                // Mostrar barra de progresso
-                document.querySelector('.progress').style.display = 'block';
                 
                 // Limpar qualquer intervalo existente
                 if (statusCheckInterval) {
                     clearInterval(statusCheckInterval);
                 }
                 
-                // Verificar o status com mais frequência no início
+                // Iniciar verificação de status
+                // No ambiente Vercel, verificar com menos frequência
+                const checkInterval = isVercel ? 1000 : 500; // 1s na Vercel, 500ms localmente
+                
                 await checkDownloadStatus();
-                statusCheckInterval = setInterval(checkDownloadStatus, 500);
+                statusCheckInterval = setInterval(checkDownloadStatus, checkInterval);
                 
             } catch (error) {
                 statusMessage.textContent = 'Erro ao iniciar o download: ' + error.message;
                 statusMessage.className = 'status-message error';
                 statusMessage.style.display = 'block';
+                spinnerContainer.style.display = 'none';
+            } finally {
+                isSubmitting = false;
             }
         });
 
@@ -243,6 +338,8 @@
         deleteBtn.addEventListener('click', async () => {
             if (confirm('Tem certeza que deseja excluir todas as imagens?')) {
                 try {
+                    spinnerContainer.style.display = 'flex';
+                    
                     const response = await fetch('/excluir', {
                         method: 'POST'
                     });
@@ -259,6 +356,8 @@
                     statusMessage.textContent = 'Erro ao excluir imagens: ' + error.message;
                     statusMessage.className = 'status-message error';
                     statusMessage.style.display = 'block';
+                } finally {
+                    spinnerContainer.style.display = 'none';
                 }
             }
         });
@@ -282,6 +381,12 @@
                     statusMessage.style.display = 'block';
                 });
         }
+        
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', function() {
+            // Esconder a barra de progresso inicialmente
+            document.querySelector('.progress').style.display = 'none';
+        });
     </script>
 </body>
 </html> 
