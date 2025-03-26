@@ -160,7 +160,7 @@
                                 
                                 const imagePreview = document.createElement('img');
                                 imagePreview.className = 'image-preview';
-                                imagePreview.src = url;
+                                imagePreview.src = `/downloads/${encodeURIComponent(url)}`;
                                 imagePreview.alt = `Imagem ${index + 1}`;
                                 
                                 const imageInfo = document.createElement('div');

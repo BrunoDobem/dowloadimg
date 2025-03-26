@@ -17,7 +17,7 @@ download_status = {
 }
 
 def excluir_downloads():
-    pasta_downloads = os.path.join(os.getcwd(), 'downloads')
+    pasta_downloads = os.path.join('/tmp', 'downloads')
     if os.path.exists(pasta_downloads):
         try:
             shutil.rmtree(pasta_downloads)
@@ -29,7 +29,7 @@ def excluir_downloads():
 
 def criar_pasta_downloads(pesquisa):
     # Criar pasta principal downloads
-    pasta_downloads = os.path.join(os.getcwd(), 'downloads')
+    pasta_downloads = os.path.join('/tmp', 'downloads')
     if not os.path.exists(pasta_downloads):
         os.makedirs(pasta_downloads)
     

@@ -42,6 +42,13 @@ def excluir_imagens():
     except Exception as e:
         return jsonify({'erro': str(e)})
 
+@app.route('/downloads/<path:filename>')
+def serve_file(filename):
+    try:
+        return send_file(os.path.join('/tmp/downloads', filename))
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 404
+
 def processar_download(pesquisa, quantidade):
     try:
         baixar_imagens(pesquisa, quantidade)
