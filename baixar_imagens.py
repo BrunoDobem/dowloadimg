@@ -6,6 +6,7 @@ import time
 from dotenv import load_dotenv
 import re
 import shutil
+import json
 
 # Variável global para armazenar o status do download
 download_status = {
@@ -90,6 +91,7 @@ def baixar_imagens(pesquisa, quantidade):
         # Contador para as imagens baixadas
         contador = 0
         urls_salvas = []  # Lista para armazenar as URLs das imagens baixadas
+        metadata = {}  # Dicionário para armazenar os metadados
         
         # Baixar as imagens
         for img_url in urls_imagens:
@@ -106,9 +108,13 @@ def baixar_imagens(pesquisa, quantidade):
                     if 'image' in content_type:
                         # Salvar a imagem
                         img_data = Image.open(BytesIO(img_response.content))
-                        caminho_imagem = os.path.join(pasta_pesquisa, f'imagem_{contador + 1}.jpg')
+                        nome_arquivo = f'imagem_{contador + 1}.jpg'
+                        caminho_imagem = os.path.join(pasta_pesquisa, nome_arquivo)
                         img_data.save(caminho_imagem)
-                        urls_salvas.append(img_url)  # Adicionar URL à lista
+                        
+                        # Armazenar metadados
+                        metadata[nome_arquivo] = img_url
+                        urls_salvas.append(nome_arquivo)  # Adicionar nome do arquivo à lista
                         contador += 1
                         
                         # Pequena pausa entre os downloads
@@ -117,6 +123,11 @@ def baixar_imagens(pesquisa, quantidade):
             except Exception as e:
                 atualizar_status(contador, f'Erro ao baixar imagem {contador + 1}: {str(e)}')
                 continue
+        
+        # Salvar metadados em um arquivo JSON
+        if metadata:
+            with open(os.path.join(pasta_pesquisa, 'metadata.json'), 'w') as f:
+                json.dump(metadata, f)
         
         atualizar_status(contador, f'Download concluído! {contador} imagens baixadas com sucesso.', urls_salvas)
                 

@@ -4,6 +4,7 @@ import os
 from baixar_imagens import baixar_imagens, excluir_downloads, download_status
 import threading
 import time
+import json
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'sua_chave_secreta_aqui'  # Necessário para o Flask-WTF
@@ -45,7 +46,28 @@ def excluir_imagens():
 @app.route('/downloads/<path:filename>')
 def serve_file(filename):
     try:
-        return send_file(os.path.join('/tmp/downloads', filename))
+        # Procurar o arquivo em todas as subpastas de downloads
+        pasta_downloads = os.path.join('/tmp', 'downloads')
+        for root, dirs, files in os.walk(pasta_downloads):
+            if filename in files:
+                caminho_completo = os.path.join(root, filename)
+                return send_file(caminho_completo)
+        return jsonify({'erro': 'Arquivo não encontrado'}), 404
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 404
+
+@app.route('/metadata/<path:filename>')
+def get_metadata(filename):
+    try:
+        # Procurar o arquivo de metadados em todas as subpastas de downloads
+        pasta_downloads = os.path.join('/tmp', 'downloads')
+        for root, dirs, files in os.walk(pasta_downloads):
+            if 'metadata.json' in files:
+                with open(os.path.join(root, 'metadata.json'), 'r') as f:
+                    metadata = json.load(f)
+                    if filename in metadata:
+                        return jsonify({'url': metadata[filename]})
+        return jsonify({'erro': 'URL não encontrada'}), 404
     except Exception as e:
         return jsonify({'erro': str(e)}), 404
 
