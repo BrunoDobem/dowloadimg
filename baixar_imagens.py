@@ -7,6 +7,12 @@ from dotenv import load_dotenv
 import re
 import shutil
 import json
+import asyncio
+import aiohttp
+import concurrent.futures
+from bs4 import BeautifulSoup
+import hashlib
+from functools import lru_cache
 
 # Variável global para armazenar o status do download
 download_status = {
@@ -52,7 +58,46 @@ def atualizar_status(progresso, mensagem, urls=None):
     if urls is not None:
         download_status['urls'] = urls
 
+@lru_cache(maxsize=20)
+def get_hash_url(url):
+    """Cria um hash para uma URL para verificar se já foi baixada"""
+    return hashlib.md5(url.encode()).hexdigest()
+
+def extrair_urls_imagens(html):
+    """Extrai URLs de imagens do HTML usando vários métodos para maior confiabilidade"""
+    urls_imagens = []
+    
+    # Método 1: Usar regex para extrair URLs - método mais confiável para o Bing
+    pattern = r'murl&quot;:&quot;(.*?)&quot;'
+    urls_regex = re.findall(pattern, html)
+    if urls_regex:
+        urls_imagens.extend(urls_regex)
+    
+    # Método 2: Usar BeautifulSoup como backup
+    if not urls_imagens:
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            for img in soup.select('.mimg'):
+                if img.get('src'):
+                    urls_imagens.append(img.get('src'))
+        except Exception:
+            pass
+    
+    # Método 3: Último recurso - busca direta no HTML
+    if not urls_imagens:
+        try:
+            for line in html.split('\n'):
+                if 'murl&quot;:&quot;' in line:
+                    img_url = line.split('murl&quot;:&quot;')[1].split('&quot;')[0]
+                    urls_imagens.append(img_url)
+        except Exception:
+            pass
+    
+    # Eliminar duplicatas e URLs vazias
+    return [url for url in list(dict.fromkeys(urls_imagens)) if url and url.startswith('http')]
+
 def baixar_imagens(pesquisa, quantidade):
+    """Versão síncrona e direta da função de download para garantir confiabilidade"""
     global download_status
     
     # Inicializar o status
@@ -72,38 +117,39 @@ def baixar_imagens(pesquisa, quantidade):
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
     }
     
-    # URL da API do Bing Images
-    url = f'https://www.bing.com/images/search?q={pesquisa}&qft=+filterui:photo-photo&FORM=IRFLTR'
-    
     try:
-        # Fazer a requisição
+        # URL da API do Bing Images
+        termo_pesquisa = pesquisa.replace(' ', '+')
+        url = f'https://www.bing.com/images/search?q={termo_pesquisa}&qft=+filterui:photo-photo&FORM=IRFLTR'
+        
         atualizar_status(0, 'Buscando imagens...')
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
-        # Encontrar URLs das imagens no HTML
-        urls_imagens = []
-        for line in response.text.split('\n'):
-            if 'murl&quot;:&quot;' in line:
-                img_url = line.split('murl&quot;:&quot;')[1].split('&quot;')[0]
-                urls_imagens.append(img_url)
+        # Extrair URLs das imagens
+        urls_imagens = extrair_urls_imagens(response.text)
+        
+        if not urls_imagens:
+            raise Exception("Nenhuma imagem encontrada. Verifique sua conexão com a internet.")
+        
+        print(f"Encontradas {len(urls_imagens)} URLs de imagens")
         
         # Contador para as imagens baixadas
         contador = 0
-        urls_salvas = []  # Lista para armazenar as URLs das imagens baixadas
-        metadata = {}  # Dicionário para armazenar os metadados
+        urls_salvas = []
+        metadata = {}
         
         # Baixar as imagens
-        for img_url in urls_imagens:
-            if contador >= quantidade:  # Limitar à quantidade escolhida
+        for i, img_url in enumerate(urls_imagens):
+            if contador >= quantidade:
                 break
                 
             try:
-                # Fazer o download da imagem
                 atualizar_status(contador, f'Baixando imagem {contador + 1} de {quantidade}...')
-                img_response = requests.get(img_url, headers=headers, timeout=10)
+                
+                # Fazer o download da imagem
+                img_response = requests.get(img_url, headers=headers, timeout=15)
                 if img_response.status_code == 200:
-                    # Verificar se é realmente uma imagem
                     content_type = img_response.headers.get('content-type', '')
                     if 'image' in content_type:
                         # Salvar a imagem
@@ -114,14 +160,13 @@ def baixar_imagens(pesquisa, quantidade):
                         
                         # Armazenar metadados
                         metadata[nome_arquivo] = img_url
-                        urls_salvas.append(img_url)  # Adicionar URL original à lista em vez do nome do arquivo
+                        urls_salvas.append(img_url)
                         contador += 1
                         
-                        # Pequena pausa entre os downloads
-                        time.sleep(1)
-                        
+                        # Pequena pausa entre os downloads (0.2 segundos)
+                        time.sleep(0.2)
             except Exception as e:
-                atualizar_status(contador, f'Erro ao baixar imagem {contador + 1}: {str(e)}')
+                print(f"Erro ao baixar imagem {i+1}: {str(e)}")
                 continue
         
         # Salvar metadados em um arquivo JSON
@@ -130,12 +175,47 @@ def baixar_imagens(pesquisa, quantidade):
                 json.dump(metadata, f)
         
         atualizar_status(contador, f'Download concluído! {contador} imagens baixadas com sucesso.', urls_salvas)
-                
+        
     except Exception as e:
         atualizar_status(0, f'Erro durante a execução: {str(e)}')
         raise e
     finally:
         download_status['em_andamento'] = False
+
+
+# Funções assíncronas mantidas como referência, mas não usadas atualmente
+async def fazer_requisicao(url, headers, session):
+    """Função assíncrona para fazer requisições HTTP"""
+    try:
+        async with session.get(url, headers=headers, timeout=5) as response:
+            if response.status == 200:
+                return await response.text()
+            return None
+    except Exception:
+        return None
+
+async def baixar_imagem(img_url, headers, pasta_pesquisa, index, metadata, session):
+    """Função assíncrona para baixar uma imagem"""
+    try:
+        async with session.get(img_url, headers=headers, timeout=10) as response:
+            if response.status == 200:
+                # Verificar se é realmente uma imagem
+                content_type = response.headers.get('content-type', '')
+                if 'image' in content_type:
+                    # Salvar a imagem
+                    img_data = await response.read()
+                    img = Image.open(BytesIO(img_data))
+                    nome_arquivo = f'imagem_{index + 1}.jpg'
+                    caminho_imagem = os.path.join(pasta_pesquisa, nome_arquivo)
+                    img.save(caminho_imagem)
+                    
+                    # Armazenar metadados
+                    metadata[nome_arquivo] = img_url
+                    return img_url, True
+    except Exception:
+        pass
+    
+    return None, False
 
 def main():
     print('Escolha uma opção:')
