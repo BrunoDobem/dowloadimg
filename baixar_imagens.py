@@ -3,14 +3,9 @@ import os
 from PIL import Image
 from io import BytesIO
 import time
-from dotenv import load_dotenv
 import re
 import shutil
 import json
-import asyncio
-import aiohttp
-import concurrent.futures
-from bs4 import BeautifulSoup
 import hashlib
 from functools import lru_cache
 
@@ -102,7 +97,6 @@ def baixar_imagens(pesquisa, quantidade):
     
     try:
         # Na Vercel, podemos apenas buscar as URLs e não baixar as imagens reais
-        # já que o ambiente serverless tem limitações de tempo/processamento
         termo_pesquisa = pesquisa.replace(' ', '+')
         url = f'https://www.bing.com/images/search?q={termo_pesquisa}&qft=+filterui:photo-photo&FORM=IRFLTR'
         
@@ -126,11 +120,11 @@ def baixar_imagens(pesquisa, quantidade):
         # No ambiente Vercel, apenas retornar as URLs encontradas
         if os.environ.get('VERCEL'):
             # Simular progresso para melhor UX
-            for i in range(quantidade):
+            for i in range(min(quantidade, len(urls_imagens))):
                 atualizar_status(i+1, f'Processando imagem {i+1} de {quantidade}...')
                 time.sleep(0.1)  # Pequena pausa para mostrar progresso
             
-            atualizar_status(quantidade, f'Download concluído! {len(urls_imagens)} URLs de imagens encontradas.', urls_imagens)
+            atualizar_status(len(urls_imagens), f'Download concluído! {len(urls_imagens)} URLs de imagens encontradas.', urls_imagens)
             return
         
         # Abaixo é executado apenas em ambiente local
@@ -189,41 +183,6 @@ def baixar_imagens(pesquisa, quantidade):
         raise e
     finally:
         download_status['em_andamento'] = False
-
-
-# Funções assíncronas mantidas como referência, mas não usadas atualmente
-async def fazer_requisicao(url, headers, session):
-    """Função assíncrona para fazer requisições HTTP"""
-    try:
-        async with session.get(url, headers=headers, timeout=5) as response:
-            if response.status == 200:
-                return await response.text()
-            return None
-    except Exception:
-        return None
-
-async def baixar_imagem(img_url, headers, pasta_pesquisa, index, metadata, session):
-    """Função assíncrona para baixar uma imagem"""
-    try:
-        async with session.get(img_url, headers=headers, timeout=10) as response:
-            if response.status == 200:
-                # Verificar se é realmente uma imagem
-                content_type = response.headers.get('content-type', '')
-                if 'image' in content_type:
-                    # Salvar a imagem
-                    img_data = await response.read()
-                    img = Image.open(BytesIO(img_data))
-                    nome_arquivo = f'imagem_{index + 1}.jpg'
-                    caminho_imagem = os.path.join(pasta_pesquisa, nome_arquivo)
-                    img.save(caminho_imagem)
-                    
-                    # Armazenar metadados
-                    metadata[nome_arquivo] = img_url
-                    return img_url, True
-    except Exception:
-        pass
-    
-    return None, False
 
 def main():
     print('Escolha uma opção:')

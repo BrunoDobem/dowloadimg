@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import os
-from baixar_imagens import baixar_imagens, excluir_downloads, download_status
+from baixar_imagens import baixar_imagens, excluir_downloads, download_status, get_download_base_dir
 import threading
 import time
 import json
@@ -89,7 +89,7 @@ def excluir_imagens():
 def serve_file(filename):
     try:
         # Procurar o arquivo em todas as subpastas de downloads
-        pasta_downloads = os.path.join('/tmp', 'downloads')
+        pasta_downloads = get_download_base_dir()
         for root, dirs, files in os.walk(pasta_downloads):
             if filename in files:
                 caminho_completo = os.path.join(root, filename)
@@ -117,7 +117,7 @@ def get_metadata(filename):
             return jsonify({'url': metadados_cache[filename]})
         
         # Procurar o arquivo de metadados em todas as subpastas de downloads
-        pasta_downloads = os.path.join('/tmp', 'downloads')
+        pasta_downloads = get_download_base_dir()
         
         for root, dirs, files in os.walk(pasta_downloads):
             if 'metadata.json' in files:
