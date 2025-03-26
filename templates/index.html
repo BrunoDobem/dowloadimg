@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Baixador de Imagens</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
@@ -72,6 +73,15 @@
         .btn-copy {
             width: 100%;
         }
+        /* Placeholder para imagens ainda não carregadas */
+        .placeholder {
+            background-color: #e9ecef;
+            width: 100%;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 <body>
@@ -108,18 +118,90 @@
     </div>
 
     <script>
-        document.getElementById('downloadForm').addEventListener('submit', async (e) => {
+        // Armazenar elementos frequentemente acessados
+        const downloadForm = document.getElementById('downloadForm');
+        const progressBar = document.querySelector('.progress-bar');
+        const statusMessage = document.getElementById('statusMessage');
+        const urlContainer = document.getElementById('urlContainer');
+        const deleteBtn = document.getElementById('deleteBtn');
+        
+        // Variável para controlar o intervalo de status
+        let statusCheckInterval = null;
+        
+        // Função para criar um card de imagem de forma direta e simples
+        function createImageElement(url, index) {
+            const imageCard = document.createElement('div');
+            imageCard.className = 'image-card';
+            
+            // Criar imagem com carregamento direto
+            const imagePreview = document.createElement('img');
+            imagePreview.className = 'image-preview';
+            imagePreview.src = url;
+            imagePreview.alt = `Imagem ${index + 1}`;
+            
+            const imageInfo = document.createElement('div');
+            imageInfo.className = 'image-info';
+            
+            const urlText = document.createElement('div');
+            urlText.className = 'url-text';
+            urlText.textContent = url;
+            
+            const copyButton = document.createElement('button');
+            copyButton.className = 'btn btn-primary btn-copy';
+            copyButton.textContent = 'Copiar URL';
+            copyButton.onclick = () => copiarUrl(url);
+            
+            imageInfo.appendChild(urlText);
+            imageInfo.appendChild(copyButton);
+            imageCard.appendChild(imagePreview);
+            imageCard.appendChild(imageInfo);
+            
+            return imageCard;
+        }
+        
+        // Função para verificar o status do download
+        async function checkDownloadStatus() {
+            try {
+                const statusResponse = await fetch('/status');
+                const status = await statusResponse.json();
+                
+                progressBar.style.width = `${(status.progresso / status.total) * 100}%`;
+                statusMessage.textContent = status.mensagem;
+                
+                if (!status.em_andamento) {
+                    clearInterval(statusCheckInterval);
+                    
+                    // Mostrar URLs das imagens
+                    if (status.urls && status.urls.length > 0) {
+                        console.log("Recebidas URLs:", status.urls.length);
+                        // Limpar o container
+                        urlContainer.innerHTML = '';
+                        
+                        status.urls.forEach((url, index) => {
+                            const imageCard = createImageElement(url, index);
+                            urlContainer.appendChild(imageCard);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao verificar status:', error);
+            }
+        }
+        
+        // Manipulador de evento para o formulário de download
+        downloadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const formData = new FormData(e.target);
-            const progressBar = document.querySelector('.progress-bar');
-            const statusMessage = document.getElementById('statusMessage');
-            const urlContainer = document.getElementById('urlContainer');
             
             // Limpar URLs anteriores
             urlContainer.innerHTML = '';
             
             try {
+                statusMessage.textContent = "Iniciando download...";
+                statusMessage.className = 'status-message success';
+                statusMessage.style.display = 'block';
+                
                 const response = await fetch('/baixar', {
                     method: 'POST',
                     body: formData
@@ -141,49 +223,14 @@
                 // Mostrar barra de progresso
                 document.querySelector('.progress').style.display = 'block';
                 
-                // Atualizar status periodicamente
-                const checkStatus = setInterval(async () => {
-                    const statusResponse = await fetch('/status');
-                    const status = await statusResponse.json();
-                    
-                    progressBar.style.width = `${(status.progresso / status.total) * 100}%`;
-                    statusMessage.textContent = status.mensagem;
-                    
-                    if (!status.em_andamento) {
-                        clearInterval(checkStatus);
-                        
-                        // Mostrar URLs das imagens
-                        if (status.urls && status.urls.length > 0) {
-                            status.urls.forEach((url, index) => {
-                                const imageCard = document.createElement('div');
-                                imageCard.className = 'image-card';
-                                
-                                const imagePreview = document.createElement('img');
-                                imagePreview.className = 'image-preview';
-                                imagePreview.src = url;
-                                imagePreview.alt = `Imagem ${index + 1}`;
-                                
-                                const imageInfo = document.createElement('div');
-                                imageInfo.className = 'image-info';
-                                
-                                const urlText = document.createElement('div');
-                                urlText.className = 'url-text';
-                                urlText.textContent = url;
-                                
-                                const copyButton = document.createElement('button');
-                                copyButton.className = 'btn btn-primary btn-copy';
-                                copyButton.textContent = 'Copiar URL';
-                                copyButton.onclick = () => copiarUrl(url);
-                                
-                                imageInfo.appendChild(urlText);
-                                imageInfo.appendChild(copyButton);
-                                imageCard.appendChild(imagePreview);
-                                imageCard.appendChild(imageInfo);
-                                urlContainer.appendChild(imageCard);
-                            });
-                        }
-                    }
-                }, 1000);
+                // Limpar qualquer intervalo existente
+                if (statusCheckInterval) {
+                    clearInterval(statusCheckInterval);
+                }
+                
+                // Verificar o status com mais frequência no início
+                await checkDownloadStatus();
+                statusCheckInterval = setInterval(checkDownloadStatus, 500);
                 
             } catch (error) {
                 statusMessage.textContent = 'Erro ao iniciar o download: ' + error.message;
@@ -192,7 +239,8 @@
             }
         });
 
-        document.getElementById('deleteBtn').addEventListener('click', async () => {
+        // Manipulador para o botão de exclusão
+        deleteBtn.addEventListener('click', async () => {
             if (confirm('Tem certeza que deseja excluir todas as imagens?')) {
                 try {
                     const response = await fetch('/excluir', {
@@ -201,15 +249,13 @@
                     
                     const data = await response.json();
                     
-                    const statusMessage = document.getElementById('statusMessage');
                     statusMessage.textContent = data.mensagem;
                     statusMessage.className = 'status-message success';
                     statusMessage.style.display = 'block';
                     
                     // Limpar URLs
-                    document.getElementById('urlContainer').innerHTML = '';
+                    urlContainer.innerHTML = '';
                 } catch (error) {
-                    const statusMessage = document.getElementById('statusMessage');
                     statusMessage.textContent = 'Erro ao excluir imagens: ' + error.message;
                     statusMessage.className = 'status-message error';
                     statusMessage.style.display = 'block';
@@ -217,13 +263,24 @@
             }
         });
 
+        // Função para copiar URL
         function copiarUrl(url) {
-            navigator.clipboard.writeText(url).then(() => {
-                alert('URL copiada para a área de transferência!');
-            }).catch(err => {
-                console.error('Erro ao copiar URL:', err);
-                alert('Erro ao copiar URL');
-            });
+            navigator.clipboard.writeText(url)
+                .then(() => {
+                    statusMessage.textContent = 'URL copiada para a área de transferência!';
+                    statusMessage.className = 'status-message success';
+                    statusMessage.style.display = 'block';
+                    
+                    setTimeout(() => {
+                        statusMessage.style.display = 'none';
+                    }, 2000);
+                })
+                .catch(err => {
+                    console.error('Erro ao copiar URL:', err);
+                    statusMessage.textContent = 'Erro ao copiar URL';
+                    statusMessage.className = 'status-message error';
+                    statusMessage.style.display = 'block';
+                });
         }
     </script>
 </body>
